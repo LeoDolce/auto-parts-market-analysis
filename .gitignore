@@ -1,0 +1,33 @@
+# Environment
+.env
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+logs/*.log
+
+# Data
+data/raw/*.csv
+data/raw/*.xlsx
+data/raw/*.xls
+
+data/processed/*.csv
+data/processed/*.xlsx
+data/processed/*.xls
+
+data/exports/*.csv
+data/exports/*.xlsx
+
+# Sistema
+.DS_Store
+Thumbs.db
