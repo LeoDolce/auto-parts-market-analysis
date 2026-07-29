@@ -3,11 +3,7 @@ import requests
 import pandas as pd
 import time
 from dotenv import load_dotenv
-from config import (
-    LAT,
-    LNG,
-    SEARCH_RADIUS
-)
+from config import study_area
 
 # =========================
 # LOAD ENVIRONMENT VARIABLES
@@ -41,8 +37,8 @@ for search_type in SEARCH_TYPES:
     print(f"\nSearching for: {search_type}")
 
     params = {
-        "location": f"{LAT},{LNG}",
-        "radius": SEARCH_RADIUS,
+        "location": f"{study_area.latitude},{study_area.longitude}",
+        "radius": study_area.radius,
         "type": search_type,
         "key": API_KEY
     }

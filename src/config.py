@@ -1,3 +1,13 @@
-LAT = -23.675394
-LNG = -46.788774
-SEARCH_RADIUS = 2500
+from dataclasses import dataclass
+
+@dataclass
+class StudyArea:
+    latitude: float
+    longitude: float
+    radius: int
+
+study_area = StudyArea(
+    latitude=-23.675394,
+    longitude=-46.788774,
+    radius=2500
+)
