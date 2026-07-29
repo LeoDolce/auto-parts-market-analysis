@@ -25,23 +25,23 @@ Docker (planned)
 
 Architecture:
 
-         pipeline.py
-             │
-     ┌───────┼───────┐
-     │               │
-     ▼               ▼
-google_places   google_workshops
-collector.py    collector.py
-     │               │
-     └───────┬───────┘
-             ▼
-         cleaner.py
-             ▼
-        analysis.py
-             ▼
-        exporter.py
-             ▼
-      Power BI / CSV
+              pipeline.py
+                  │
+          ┌───────┼───────┐
+          │               │
+          ▼               ▼
+     google_places   google_workshops
+     collector.py    collector.py
+          │               │
+          └───────┬───────┘
+                  ▼
+              cleaner.py
+                  ▼
+             analysis.py
+                  ▼
+             exporter.py
+                  ▼
+           Power BI / CSV
 
 Roadmap:
 
