@@ -16,18 +16,12 @@ __pycache__/
 # Logs
 logs/*.log
 
-# Data
-data/raw/*.csv
-data/raw/*.xlsx
-data/raw/*.xls
-
-data/processed/*.csv
-data/processed/*.xlsx
-data/processed/*.xls
-
-data/exports/*.csv
-data/exports/*.xlsx
+# Ignore all data files completely
+data/**/*
 
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Do not ignore .gitkeep files so folder structure is preserved
+!data/**/.gitkeep
