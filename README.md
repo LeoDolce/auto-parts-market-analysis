@@ -17,9 +17,7 @@ A data-driven tool that helps evaluate the potential of opening an auto parts st
 
 - Python (GeoPandas, Shapely, Pandas)
 - Google Places API
-- PostgreSQL *(planned)*
 - Power BI
-- Docker *(planned)*
 
 ## Architecture
 
