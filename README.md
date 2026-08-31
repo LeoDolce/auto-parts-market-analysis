@@ -97,6 +97,7 @@ Instead, SENATRAN is used as an important diagnostic source for understanding th
 ---
 
 ## Architecture
+```
                         pipeline.py
                              │
      ┌───────────────┬───────┴───────────────┬───────────────┐
@@ -112,6 +113,7 @@ collector.py     collector.py          collector.py      collector.py
                 analysis.py
                      ▼
               Power BI / Excel
+```
 
 Each source is collected independently and preserved as raw data before further processing.
 
