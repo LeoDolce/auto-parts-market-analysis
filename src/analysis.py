@@ -39,7 +39,6 @@ total_competitors = len(df_autopecas_clean)
 # ==============================================================================
 # LOAD AND CLEAN TARGET CLIENTS DATA (WORKSHOPS)
 # ==============================================================================
-# Graceful check if you have already generated the workshops csv local file asset
 if os.path.exists(workshops_raw_path):
     try:
         df_workshops = pd.read_csv(workshops_raw_path, encoding='utf-8')
@@ -48,8 +47,7 @@ if os.path.exists(workshops_raw_path):
     df_workshops_clean = df_workshops.drop_duplicates(subset=['place_id']).copy()
     total_b2b_clients = len(df_workshops_clean)
 else:
-    print(f"[NOTE] Workshops file not found at '{workshops_raw_path}'. Simulating B2B baseline data matrix.")
-    total_b2b_clients = 42  # Realistic workshop baseline for Capão Redondo dense perimeter
+    print(f"[NOTE] Workshops file not found at '{workshops_raw_path}'.)
 
 
 # ==============================================================================
