@@ -2,138 +2,406 @@ import os
 import pandas as pd
 from openpyxl.utils import get_column_letter
 
-# ==============================================================================
-# DEFINE SOURCE FILE PATHS AND ANALYSIS CONSTANTS
-# ==============================================================================
-autopecas_raw_path = "data/raw/autopecas_capao_redondo.csv"
-workshops_raw_path = "data/raw/workshops_capao_redondo.csv"  # Adapt filename if needed
-demographics_processed_path = "data/processed/market_research_demographics.xlsx"
-fleet_processed_path = "data/processed/market_research_fleet_analysis.xlsx"
 
-# COMMERCIAL FLEET CALIBRATION FACTOR
-# Weighted index to remove rental car spikes, mirroring regional household purchasing reality (~0.33 cars/person)
-FLEET_CALIBRATION_FACTOR = 0.33
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+
+AUTO_PARTS_RAW_PATH = "data/raw/autopecas_capao_redondo.csv"
+WORKSHOPS_RAW_PATH = "data/raw/workshops_capao_redondo.csv"
+DEMOGRAPHICS_PROCESSED_PATH = "data/processed/market_research_demographics.xlsx"
+
+FINAL_REPORT_PATH = "data/processed/final_market_research_report.xlsx"
+
+# --------------------------------------------------------------------------
+# MODELING ASSUMPTION
+# --------------------------------------------------------------------------
+# This is NOT an official IBGE or SENATRAN statistic.
+#
+# It is an analytical assumption used to estimate the vehicle population
+# potentially associated with the study area's residents.
+#
+# The parameter is intentionally kept explicit so it can be replaced when
+# better local vehicle-ownership data becomes available.
+ESTIMATED_VEHICLES_PER_CAPITA = 0.33
+
 
 print("Initializing Final Market Cross-Correlation Engine...")
 
 
 # ==============================================================================
-# LOAD AND CLEAN COMPETITORS DATA (AUTO PARTS)
+# HELPER FUNCTIONS
 # ==============================================================================
-if not os.path.exists(autopecas_raw_path):
-    raise FileNotFoundError(f"[ERROR] Competitor file missing at: {autopecas_raw_path}")
 
-try:
-    df_autopecas = pd.read_csv(autopecas_raw_path, encoding='utf-8')
-except Exception:
-    df_autopecas = pd.read_csv(autopecas_raw_path, encoding='latin1')
+def load_csv_with_encoding_fallback(file_path):
+    """
+    Load a CSV using UTF-8 first and Latin-1 as a fallback.
+    """
 
-# Fix corrupted strings caused by Excel/Windows text encoding translation layout
-if 'keyword_used' in df_autopecas.columns:
-    df_autopecas['keyword_used'] = df_autopecas['keyword_used'].str.replace('Ã§', 'ç').str.replace('Ã', 'á')
+    try:
+        return pd.read_csv(file_path, encoding="utf-8")
+    except UnicodeDecodeError:
+        return pd.read_csv(file_path, encoding="latin1")
 
-df_autopecas_clean = df_autopecas.drop_duplicates(subset=['place_id']).copy()
+
+# ==============================================================================
+# VALIDATE REQUIRED INPUT FILES
+# ==============================================================================
+
+if not os.path.exists(AUTO_PARTS_RAW_PATH):
+    raise FileNotFoundError(
+        f"[ERROR] Competitor file missing at: {AUTO_PARTS_RAW_PATH}"
+    )
+
+if not os.path.exists(WORKSHOPS_RAW_PATH):
+    raise FileNotFoundError(
+        f"[ERROR] Workshop file missing at: {WORKSHOPS_RAW_PATH}"
+    )
+
+if not os.path.exists(DEMOGRAPHICS_PROCESSED_PATH):
+    raise FileNotFoundError(
+        "[ERROR] Run the IBGE collector first. "
+        f"Missing: {DEMOGRAPHICS_PROCESSED_PATH}"
+    )
+
+
+# ==============================================================================
+# LOAD AND CLEAN COMPETITOR DATA
+# ==============================================================================
+
+print("\nLoading competitor data...")
+
+df_autopecas = load_csv_with_encoding_fallback(AUTO_PARTS_RAW_PATH)
+
+if "place_id" not in df_autopecas.columns:
+    raise ValueError(
+        "[ERROR] Competitor dataset does not contain the required 'place_id' column."
+    )
+
+# Remove duplicated Google Places records.
+df_autopecas_clean = df_autopecas.drop_duplicates(
+    subset=["place_id"]
+).copy()
+
 total_competitors = len(df_autopecas_clean)
 
+print(f" -> Unique competitors: {total_competitors}")
+
 
 # ==============================================================================
-# LOAD AND CLEAN TARGET CLIENTS DATA (WORKSHOPS)
+# LOAD AND CLEAN WORKSHOP DATA
 # ==============================================================================
-if os.path.exists(workshops_raw_path):
-    try:
-        df_workshops = pd.read_csv(workshops_raw_path, encoding='utf-8')
-    except Exception:
-        df_workshops = pd.read_csv(workshops_raw_path, encoding='latin1')
-    df_workshops_clean = df_workshops.drop_duplicates(subset=['place_id']).copy()
-    total_b2b_clients = len(df_workshops_clean)
+
+print("\nLoading workshop data...")
+
+df_workshops = load_csv_with_encoding_fallback(WORKSHOPS_RAW_PATH)
+
+if "place_id" not in df_workshops.columns:
+    raise ValueError(
+        "[ERROR] Workshop dataset does not contain the required 'place_id' column."
+    )
+
+# Remove duplicated Google Places records.
+df_workshops_clean = df_workshops.drop_duplicates(
+    subset=["place_id"]
+).copy()
+
+total_b2b_clients = len(df_workshops_clean)
+
+print(f" -> Unique workshops: {total_b2b_clients}")
+
+
+# ==============================================================================
+# LOAD IBGE DEMOGRAPHIC DATA
+# ==============================================================================
+
+print("\nLoading IBGE demographic data...")
+
+df_demo = pd.read_excel(
+    DEMOGRAPHICS_PROCESSED_PATH,
+    sheet_name="Demographic Indicators"
+)
+
+required_demo_columns = [
+    "Allocated Population in Radius",
+    "Average Monthly Income (BRL)"
+]
+
+missing_columns = [
+    column
+    for column in required_demo_columns
+    if column not in df_demo.columns
+]
+
+if missing_columns:
+    raise ValueError(
+        "[ERROR] IBGE dataset is missing required columns: "
+        + ", ".join(missing_columns)
+    )
+
+
+# ==============================================================================
+# DEMOGRAPHIC AGGREGATION
+# ==============================================================================
+
+# Population allocated to the study radius based on the proportion of each
+# census sector that falls inside the analyzed perimeter.
+
+total_population = int(
+    df_demo["Allocated Population in Radius"].sum()
+)
+
+
+# --------------------------------------------------------------------------
+# POPULATION-WEIGHTED AVERAGE INCOME
+# --------------------------------------------------------------------------
+#
+# A simple arithmetic mean would give the same importance to every census
+# sector, regardless of how much population from that sector is actually
+# inside the study area.
+#
+# Instead, each sector's income is weighted by its allocated population.
+# --------------------------------------------------------------------------
+
+df_income = df_demo[
+    [
+        "Allocated Population in Radius",
+        "Average Monthly Income (BRL)"
+    ]
+].copy()
+
+df_income = df_income.dropna(
+    subset=[
+        "Allocated Population in Radius",
+        "Average Monthly Income (BRL)"
+    ]
+)
+
+if df_income["Allocated Population in Radius"].sum() > 0:
+
+    weighted_income = (
+        (
+            df_income["Allocated Population in Radius"]
+            * df_income["Average Monthly Income (BRL)"]
+        ).sum()
+        /
+        df_income["Allocated Population in Radius"].sum()
+    )
+
 else:
-    print(f"[NOTE] Workshops file not found at '{workshops_raw_path}'.)
+    weighted_income = 0
 
 
 # ==============================================================================
-# INGEST PROCESSED DEMOGRAPHICS AND APPLY FLEET CALIBRATION
+# LOCAL FLEET ESTIMATION
 # ==============================================================================
-if not os.path.exists(demographics_processed_path):
-    raise FileNotFoundError(f"[ERROR] Run the IBGE collector first. Missing: {demographics_processed_path}")
 
-df_demo = pd.read_excel(demographics_processed_path, sheet_name='Demographic Indicators')
+# The raw SENATRAN municipal fleet is not directly used as a local fleet
+# estimate because the available geographic distribution contains major
+# limitations, including a large volume of records associated with CEP
+# 00000-000 and potential corporate/rental fleet distortion.
+#
+# Therefore, the project uses an explicit modeling assumption instead.
 
-# Aggregate the true population and household income allocated inside your 2.5km perimeter
-total_population = int(df_demo['Allocated Population in Radius'].sum())
-average_income = df_demo['Average Monthly Income (BRL)'].mean()
+estimated_local_fleet = int(
+    total_population * ESTIMATED_VEHICLES_PER_CAPITA
+)
 
-# APPLYING THE DATA ENGINEERING CALIBRATION BRAKE (Socioeconomic reality filter)
-calibrated_local_fleet = int(total_population * FLEET_CALIBRATION_FACTOR)
 
-print(f"\nIngested Demographic Baseline Data:")
-print(f" -> Radius Population: {total_population:,} inhabitants")
-print(f" -> Active Calibrated Fleet: {calibrated_local_fleet:,} vehicles")
-print(f" -> B2B Target Customers (Workshops): {total_b2b_clients} businesses")
+print("\nIngested Market Baseline:")
+print(f" -> Population inside radius: {total_population:,}")
+print(f" -> Weighted average income: R$ {weighted_income:,.2f}")
+print(
+    f" -> Estimated local fleet: {estimated_local_fleet:,}"
+    f" ({ESTIMATED_VEHICLES_PER_CAPITA} vehicles/inhabitant)"
+)
+print(f" -> B2B target customers: {total_b2b_clients}")
 
 
 # ==============================================================================
-# COMPUTE ADVANCED MARKET SATURATION & SCORE INDICATORS
+# MARKET INDICATORS
 # ==============================================================================
-print("\nCalculating cross-correlation opportunity indexes...")
 
-# Density scores computation
-vehicles_per_store = int(calibrated_local_fleet / total_competitors) if total_competitors > 0 else calibrated_local_fleet
-inhabitants_per_store = int(total_population / total_competitors) if total_competitors > 0 else total_population
-workshops_per_store = round(total_b2b_clients / total_competitors, 2) if total_competitors > 0 else total_b2b_clients
+print("\nCalculating market indicators...")
 
-# Define the commercial scorecard matrix
+
+if total_competitors > 0:
+
+    inhabitants_per_store = round(
+        total_population / total_competitors
+    )
+
+    vehicles_per_store = round(
+        estimated_local_fleet / total_competitors
+    )
+
+    workshops_per_store = round(
+        total_b2b_clients / total_competitors,
+        2
+    )
+
+else:
+
+    inhabitants_per_store = total_population
+    vehicles_per_store = estimated_local_fleet
+    workshops_per_store = total_b2b_clients
+
+
+# ==============================================================================
+# EXECUTIVE SCORECARD
+# ==============================================================================
+
 df_market_summary = pd.DataFrame([
-    {"Indicator Metric": "Validated Competitors (Auto Parts)", "Value": total_competitors, "Unit": "Stores"},
-    {"Indicator Metric": "Target B2B Clients (Workshops)", "Value": total_b2b_clients, "Unit": "Oficinas"},
-    {"Indicator Metric": "Total Perimeter Population", "Value": total_population, "Unit": "Inhabitants"},
-    {"Indicator Metric": "Calibrated Vehicle Fleet", "Value": calibrated_local_fleet, "Unit": "Vehicles"},
-    {"Indicator Metric": "Market Saturation Index", "Value": inhabitants_per_store, "Unit": "Inhabitants / Store"},
-    {"Indicator Metric": "Commercial Demand Index", "Value": vehicles_per_store, "Unit": "Vehicles / Store"},
-    {"Indicator Metric": "B2B Client-to-Competitor Ratio", "Value": workshops_per_store, "Unit": "Workshops / Store"},
-    {"Indicator Metric": "Estimated Average Family Income", "Value": round(average_income, 2), "Unit": "BRL"}
+    {
+        "Indicator Metric": "Validated Competitors (Auto Parts)",
+        "Value": total_competitors,
+        "Unit": "Stores"
+    },
+    {
+        "Indicator Metric": "Target B2B Clients (Workshops)",
+        "Value": total_b2b_clients,
+        "Unit": "Workshops"
+    },
+    {
+        "Indicator Metric": "Total Perimeter Population",
+        "Value": total_population,
+        "Unit": "Inhabitants"
+    },
+    {
+        "Indicator Metric": "Estimated Local Fleet",
+        "Value": estimated_local_fleet,
+        "Unit": "Vehicles"
+    },
+    {
+        "Indicator Metric": "Population per Competitor",
+        "Value": inhabitants_per_store,
+        "Unit": "Inhabitants / Store"
+    },
+    {
+        "Indicator Metric": "Estimated Vehicles per Competitor",
+        "Value": vehicles_per_store,
+        "Unit": "Vehicles / Store"
+    },
+    {
+        "Indicator Metric": "B2B Client-to-Competitor Ratio",
+        "Value": workshops_per_store,
+        "Unit": "Workshops / Store"
+    },
+    {
+        "Indicator Metric": "Population-Weighted Average Income",
+        "Value": round(weighted_income, 2),
+        "Unit": "BRL"
+    }
 ])
 
 
 # ==============================================================================
-# DATA EXPORT TO PROCESSED DIRECTORY (FINAL CONSOLIDATED EXCEL)
+# EXPORT CONSOLIDATED REPORT
 # ==============================================================================
-os.makedirs("data/processed", exist_ok=True)
-final_report_path = "data/processed/final_market_research_report.xlsx"
 
-print(f"\nExporting consolidated executive report to: {final_report_path}")
+os.makedirs(
+    os.path.dirname(FINAL_REPORT_PATH),
+    exist_ok=True
+)
 
-with pd.ExcelWriter(final_report_path, engine='openpyxl') as writer:
-    df_market_summary.to_excel(writer, sheet_name='Executive Scorecard', index=False)
-    df_autopecas_clean.to_excel(writer, sheet_name='Cleaned Competitors', index=False)
-    if 'df_workshops_clean' in locals():
-        df_workshops_clean.to_excel(writer, sheet_name='Target B2B Clients', index=False)
-        
+print(
+    f"\nExporting consolidated report to: "
+    f"{FINAL_REPORT_PATH}"
+)
+
+
+with pd.ExcelWriter(
+    FINAL_REPORT_PATH,
+    engine="openpyxl"
+) as writer:
+
+    df_market_summary.to_excel(
+        writer,
+        sheet_name="Executive Scorecard",
+        index=False
+    )
+
+    df_autopecas_clean.to_excel(
+        writer,
+        sheet_name="Cleaned Competitors",
+        index=False
+    )
+
+    df_workshops_clean.to_excel(
+        writer,
+        sheet_name="Target B2B Clients",
+        index=False
+    )
+
+    # Automatic column sizing
     for sheet_name in writer.sheets:
+
         worksheet = writer.sheets[sheet_name]
-        for col_idx, col in enumerate(worksheet.columns, start=1):
-            max_len = max(len(str(cell.value or '')) for cell in col)
-            col_letter = get_column_letter(col_idx)
-            worksheet.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+        for col_idx, column in enumerate(
+            worksheet.columns,
+            start=1
+        ):
+
+            max_len = max(
+                len(str(cell.value or ""))
+                for cell in column
+            )
+
+            column_letter = get_column_letter(col_idx)
+
+            worksheet.column_dimensions[
+                column_letter
+            ].width = max(max_len + 4, 12)
 
 
 # ==============================================================================
-# EXECUTIVE SUMMARY TERMINAL DASHBOARD
+# TERMINAL SUMMARY
 # ==============================================================================
-print("\n" + "="*50)
-print("     FINAL COMMERCIAL OPPORTUNITY SCORECARD     ")
-print("="*50)
-print(f"Total Unique Competitors Found:   {total_competitors} stores")
-print(f"B2B Client Buffer Density:        {workshops_per_store} workshops per auto parts store")
-print(f"Vehicle Demand Score:             {vehicles_per_store:,} vehicles per store")
 
-print("\n--- STRATEGIC INVESTMENT DIAGNOSIS ---")
-if vehicles_per_store > 2500 and workshops_per_store >= 1.5:
-    print("MARKET STATUS: 🟢 EXCELLENT OPPORTUNITY (Oceano Azul)")
-    print("Diagnosis: High volume of vehicles combined with a strong B2B mechanical workshop cushion. Excellent market entry conditions.")
-elif vehicles_per_store >= 1200:
-    print("MARKET STATUS: 🟡 BALANCED MARKET")
-    print("Diagnosis: Healthy competition setup. A new operation requires specialized parts or superior logistics setup to capture B2B client share.")
-else:
-    print("MARKET STATUS: 🔴 HIGHLY SATURATED")
-    print("Diagnosis: Severe commercial crowding. High-risk territory unless exploring a specific underserved niche component.")
-print("="*50 + "\n")
+print("\n" + "=" * 55)
+print("          MARKET OPPORTUNITY BASELINE")
+print("=" * 55)
+
+print(
+    f"Unique competitors:       {total_competitors}"
+)
+
+print(
+    f"Target workshops:         {total_b2b_clients}"
+)
+
+print(
+    f"Population in radius:     {total_population:,}"
+)
+
+print(
+    f"Estimated fleet:          {estimated_local_fleet:,}"
+)
+
+print(
+    f"Population / competitor:  {inhabitants_per_store:,}"
+)
+
+print(
+    f"Vehicles / competitor:    {vehicles_per_store:,}"
+)
+
+print(
+    f"Workshops / competitor:   {workshops_per_store}"
+)
+
+print(
+    f"Weighted income:          R$ {weighted_income:,.2f}"
+)
+
+print("=" * 55)
+
+print(
+    "\nNOTE:"
+    "\nThe fleet figure is an analytical estimate based on"
+    f"\n{ESTIMATED_VEHICLES_PER_CAPITA} vehicles per inhabitant."
+    "\nIt is not an official SENATRAN local-fleet figure."
+)
+
+print("=" * 55 + "\n")
